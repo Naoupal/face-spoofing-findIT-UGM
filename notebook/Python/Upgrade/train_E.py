@@ -14,8 +14,9 @@ def train_model():
     EPOCHS = 15      
     LEARNING_RATE = 1e-3
     IMG_SIZE = 300   
-    DATA_DIR = '../Data/train_cropped/'
-    MODEL_SAVE_PATH = '../Models/efficientnet_b3_model.pth'
+    # Gunakan path lengkap agar tidak bingung
+    DATA_DIR = r'E:\Python - Project\face-spoofing-findIT-UGM\data\train'
+    MODEL_SAVE_PATH = r'E:\Python - Project\face-spoofing-findIT-UGM\outputs\efficientnet_b3_model.pth'
     
     os.makedirs('../Models/', exist_ok=True)
 
