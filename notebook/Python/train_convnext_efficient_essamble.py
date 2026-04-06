@@ -18,7 +18,7 @@ from tqdm.auto import tqdm
 # ========================
 CFG = {
     'seed': 42,
-    'models': ['efficientnet_b0', 'convnext_tiny'],  # 🔥 2 model
+    'models': ['efficientnet_b0', 'convnext_tiny'],
     'img_size': 224,
     'batch_size': 32,
     'epochs': 5,
@@ -35,25 +35,17 @@ def set_seed(seed=42):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-set_seed(CFG['seed'])
-
-print(f"🚀 Device: {CFG['device']}")
-if torch.cuda.is_available():
-    print(f"🔥 GPU: {torch.cuda.get_device_name(0)}")
 
 # ========================
 # DATASET
 # ========================
 class FaceDataset(Dataset):
-    def __init__(self, file_paths, labels=None, transform=None, is_test=False, original_ids=None):
+    def __init__(self, file_paths, labels=None, transform=None, is_test=False, ids=None):
         self.file_paths = file_paths
         self.labels = labels
         self.transform = transform
         self.is_test = is_test
-        self.original_ids = original_ids
+        self.ids = ids
 
     def __len__(self):
         return len(self.file_paths)
@@ -69,7 +61,7 @@ class FaceDataset(Dataset):
             img = self.transform(img)
 
         if self.is_test:
-            return img, self.original_ids[idx]
+            return img, self.ids[idx]
 
         return img, torch.tensor(self.labels[idx], dtype=torch.long)
 
@@ -79,16 +71,14 @@ class FaceDataset(Dataset):
 transform = transforms.Compose([
     transforms.Resize((CFG['img_size'], CFG['img_size'])),
     transforms.RandomHorizontalFlip(),
-    transforms.RandomRotation(10),
     transforms.ColorJitter(0.3, 0.3),
-    transforms.GaussianBlur(3),
     transforms.ToTensor(),
     transforms.Normalize([0.485, 0.456, 0.406],
                          [0.229, 0.224, 0.225])
 ])
 
 # ========================
-# DATA LOADER
+# DATA
 # ========================
 def get_train_data(base_path):
     file_paths, labels = [], []
@@ -101,8 +91,9 @@ def get_train_data(base_path):
     for cls in classes:
         print(f"{class_to_idx[cls]} -> {cls}")
         folder = os.path.join(base_path, cls)
+
         for img in os.listdir(folder):
-            if img.endswith(('.jpg','.png','.jpeg')):
+            if img.endswith(('.jpg', '.png', '.jpeg')):
                 file_paths.append(os.path.join(folder, img))
                 labels.append(class_to_idx[cls])
 
@@ -113,22 +104,23 @@ def get_test_data(csv_path, test_dir):
     df = pd.read_csv(csv_path)
     paths, ids = [], []
 
-    for img_id in df.iloc[:,0]:
+    for img_id in df.iloc[:, 0]:
         img_id = str(img_id)
         ids.append(img_id)
 
         path = os.path.join(test_dir, img_id)
         if not os.path.exists(path):
-            for ext in ['.jpg','.png','.jpeg']:
-                if os.path.exists(path+ext):
+            for ext in ['.jpg', '.png', '.jpeg']:
+                if os.path.exists(path + ext):
                     path += ext
                     break
+
         paths.append(path)
 
     return paths, ids
 
 # ========================
-# MODEL BUILDER
+# MODEL
 # ========================
 class FaceModel(nn.Module):
     def __init__(self, model_name, num_classes):
@@ -143,16 +135,13 @@ class FaceModel(nn.Module):
             in_features = self.model.head.fc.in_features
             self.model.head.fc = nn.Linear(in_features, num_classes)
 
-        else:
-            raise ValueError("Model tidak didukung")
-
     def forward(self, x):
         return self.model(x)
 
 # ========================
-# TRAIN FUNCTION
+# TRAIN
 # ========================
-def train_model(model_name, train_paths, train_labels):
+def train_model(model_name, train_paths, train_labels, num_classes):
     print(f"\n🔥 Training {model_name}")
 
     skf = StratifiedKFold(n_splits=CFG['n_folds'], shuffle=True, random_state=CFG['seed'])
@@ -166,16 +155,14 @@ def train_model(model_name, train_paths, train_labels):
             FaceDataset(train_paths[t_idx], train_labels[t_idx], transform),
             batch_size=CFG['batch_size'],
             shuffle=True,
-            num_workers=2,
-            pin_memory=True
+            num_workers=0   # 🔥 FIX ERROR WINDOWS
         )
 
         val_loader = DataLoader(
             FaceDataset(train_paths[v_idx], train_labels[v_idx], transform),
             batch_size=CFG['batch_size'],
             shuffle=False,
-            num_workers=2,
-            pin_memory=True
+            num_workers=0
         )
 
         model = FaceModel(model_name, num_classes).to(CFG['device'])
@@ -193,7 +180,6 @@ def train_model(model_name, train_paths, train_labels):
                 loss.backward()
                 optimizer.step()
 
-            # VALIDATION
             model.eval()
             y_true, y_pred = [], []
 
@@ -201,7 +187,7 @@ def train_model(model_name, train_paths, train_labels):
                 for imgs, lbls in val_loader:
                     outputs = model(imgs.to(CFG['device']))
                     y_true.extend(lbls.numpy())
-                    y_pred.extend(torch.argmax(outputs,1).cpu().numpy())
+                    y_pred.extend(torch.argmax(outputs, 1).cpu().numpy())
 
             f1 = f1_score(y_true, y_pred, average='macro')
             print(f"Epoch {epoch+1} F1: {f1:.4f}")
@@ -213,19 +199,20 @@ def train_model(model_name, train_paths, train_labels):
     return best_path
 
 # ========================
-# INFERENCE
+# PREDICT
 # ========================
-def predict(model_paths, test_paths, ids):
-    test_loader = DataLoader(
-        FaceDataset(test_paths, transform=transform, is_test=True, original_ids=ids),
+def predict(model_paths, test_paths, ids, num_classes):
+    loader = DataLoader(
+        FaceDataset(test_paths, transform=transform, is_test=True, ids=ids),
         batch_size=CFG['batch_size'],
-        shuffle=False
+        shuffle=False,
+        num_workers=0
     )
 
     final_probs = None
 
     for model_name, path in model_paths:
-        print(f"🔮 Predicting with {model_name}")
+        print(f"🔮 Predicting {model_name}")
 
         model = FaceModel(model_name, num_classes).to(CFG['device'])
         model.load_state_dict(torch.load(path))
@@ -234,7 +221,7 @@ def predict(model_paths, test_paths, ids):
         probs_list = []
 
         with torch.no_grad():
-            for imgs, _ in test_loader:
+            for imgs, _ in loader:
                 outputs = model(imgs.to(CFG['device']))
                 probs = torch.softmax(outputs, dim=1).cpu().numpy()
                 probs_list.append(probs)
@@ -244,36 +231,42 @@ def predict(model_paths, test_paths, ids):
         if final_probs is None:
             final_probs = probs_all
         else:
-            final_probs += probs_all  # 🔥 ensemble
+            final_probs += probs_all
 
-    final_preds = np.argmax(final_probs, axis=1)
-    return final_preds
+    preds = np.argmax(final_probs, axis=1)
+    return preds
 
 # ========================
-# MAIN
+# MAIN (WAJIB DI WINDOWS)
 # ========================
-TRAIN_PATH = 'data/train'
-TEST_DIR = 'data/test'
-CSV_PATH = 'outputs/samplesubmission.csv'
+if __name__ == "__main__":
 
-train_paths, train_labels, num_classes, idx_to_class = get_train_data(TRAIN_PATH)
-test_paths, ids = get_test_data(CSV_PATH, TEST_DIR)
+    set_seed(CFG['seed'])
 
-model_paths = []
+    print(f"🚀 Device: {CFG['device']}")
+    if torch.cuda.is_available():
+        print(f"🔥 GPU: {torch.cuda.get_device_name(0)}")
 
-# TRAIN SEMUA MODEL
-for model_name in CFG['models']:
-    path = train_model(model_name, train_paths, train_labels)
-    model_paths.append((model_name, path))
+    TRAIN_PATH = 'data/train'
+    TEST_DIR = 'data/test'
+    CSV_PATH = 'outputs/samplesubmission.csv'
 
-# ENSEMBLE PREDICTION
-preds = predict(model_paths, test_paths, ids)
+    train_paths, train_labels, num_classes, idx_to_class = get_train_data(TRAIN_PATH)
+    test_paths, ids = get_test_data(CSV_PATH, TEST_DIR)
 
-pred_labels = [idx_to_class[i] for i in preds]
+    model_paths = []
 
-pd.DataFrame({
-    'id': ids,
-    'label': pred_labels
-}).to_csv('submission_convnext_efficient.csv', index=False)
+    for model_name in CFG['models']:
+        path = train_model(model_name, train_paths, train_labels, num_classes)
+        model_paths.append((model_name, path))
 
-print("🔥 DONE! submission_convnext_efficient.csv siap!")
+    preds = predict(model_paths, test_paths, ids, num_classes)
+
+    pred_labels = [idx_to_class[i] for i in preds]
+
+    pd.DataFrame({
+        'id': ids,
+        'label': pred_labels
+    }).to_csv('submission_ensemble.csv', index=False)
+
+    print("🔥 DONE! submission_ensemble.csv siap!")
