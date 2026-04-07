@@ -14,7 +14,7 @@ def train_model():
     LEARNING_RATE = 1e-4
     IMG_SIZE = 224       
     DATA_DIR = r'E:\Python - Project\face-spoofing-findIT-UGM\data\train'
-    MODEL_SAVE_PATH = r'E:\Python - Project\face-spoofing-findIT-UGM\outputs\efficientnet_b3_model.pth'
+    MODEL_SAVE_PATH = r'E:\Python - Project\face-spoofing-findIT-UGM\outputs\best_convnext_tiny.pth'
 
     os.makedirs('../models/', exist_ok=True)
 
