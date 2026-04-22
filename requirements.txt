@@ -18,4 +18,4 @@ matplotlib>=3.7.0
 seaborn>=0.12.0
 
 # --- Utilities ---S
-tqdm>=4.65.0SSss
+tqdm>=4.65.0SSssss
